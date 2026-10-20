@@ -1,0 +1,72 @@
+name: Deploy EdgeEver Instance
+
+# 按上游标准方式部署一个独立实例：
+#   bun install --frozen-lockfile → bun run build(:worker) → wrangler deploy
+# 绑定通过 EDGE_EVER_* 环境变量注入（上游 run-wrangler.mjs 支持），
+# 不再依赖 Cloudflare 控制台里那些看不见的构建设置。
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 目标实例
+        required: true
+        default: edgeever-v3
+        type: choice
+        options:
+          - edgeever-v3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edgeever-instance-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CLOUDFLARE_ACCOUNT_ID: d2a9abecb37b836f0c4e4c586ca1b11d
+      CLOUDFLARE_API_TOKEN: ${{ secrets.EDGE_EVER_DEPLOY_TOKEN }}
+      EDGE_EVER_WORKER_NAME: ${{ inputs.target }}
+      # 亚太资源（已建好并迁完全部数据，见交付说明）
+      EDGE_EVER_D1_DATABASE_NAME: edgeever-apac
+      EDGE_EVER_D1_DATABASE_ID: e456c7ee-db24-4ce5-83da-39cda00de18a
+      EDGE_EVER_R2_BUCKET_NAME: edgeever-resources-apac
+      EDGE_EVER_AUTH_USERNAME: admin
+      EDGE_EVER_AUTH_PASSWORD: ${{ secrets.EDGE_EVER_AUTH_PASSWORD }}
+      EDGE_EVER_SESSION_TTL_DAYS: "30"
+      EDGE_EVER_DEPLOYMENT_METHOD: github_actions
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web assets
+        run: bun run build
+
+      - name: Build worker bundle
+        run: bun run build:worker
+
+      - name: Deploy worker
+        run: bun scripts/run-wrangler.mjs deploy
+
+      - name: Verify deployment
+        run: |
+          set -euo pipefail
+          base="https://${EDGE_EVER_WORKER_NAME}.zhangxiaonan1986.workers.dev"
+          echo "检查 ${base}"
+          for path in /api/health /api/openapi.json; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "${base}${path}" || true)"
+            echo "  ${path} -> ${code}"
+          done
