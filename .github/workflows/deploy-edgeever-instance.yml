@@ -1,9 +1,13 @@
 name: Deploy EdgeEver Instance
 
-# 按上游标准方式部署一个独立实例：
-#   bun install --frozen-lockfile → bun run build(:worker) → wrangler deploy
-# 绑定通过 EDGE_EVER_* 环境变量注入（上游 run-wrangler.mjs 支持），
-# 不再依赖 Cloudflare 控制台里那些看不见的构建设置。
+# 按上游标准方式部署实例：
+#   bun install --frozen-lockfile → bun run build → bun run build:worker → wrangler deploy
+# 绑定通过 EDGE_EVER_* 环境变量注入（上游 run-wrangler.mjs 原生支持），
+# 不依赖 Cloudflare 控制台里的构建配置，因此不会被上游同步覆盖。
+#
+# 两种触发：
+#   1) 手动（可指定目标实例）
+#   2) "Update deployed EdgeEver" 同步上游成功后自动部署，实现"跟着上游更新"
 
 on:
   workflow_dispatch:
@@ -15,6 +19,9 @@ on:
         type: choice
         options:
           - edgeever-v3
+  workflow_run:
+    workflows: ["Update deployed EdgeEver"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -25,12 +32,14 @@ concurrency:
 
 jobs:
   deploy:
+    # 手动触发总是执行；由同步工作流触发时，只有同步成功才部署
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       CLOUDFLARE_ACCOUNT_ID: d2a9abecb37b836f0c4e4c586ca1b11d
       CLOUDFLARE_API_TOKEN: ${{ secrets.EDGE_EVER_DEPLOY_TOKEN }}
-      EDGE_EVER_WORKER_NAME: ${{ inputs.target }}
+      EDGE_EVER_WORKER_NAME: ${{ inputs.target || 'edgeever-v3' }}
       # 亚太资源（已建好并迁完全部数据，见交付说明）
       EDGE_EVER_D1_DATABASE_NAME: edgeever-apac
       EDGE_EVER_D1_DATABASE_ID: e456c7ee-db24-4ce5-83da-39cda00de18a
@@ -43,6 +52,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 同步工作流刚推的提交可能还没成为默认分支 HEAD，显式取 main
+          ref: main
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
