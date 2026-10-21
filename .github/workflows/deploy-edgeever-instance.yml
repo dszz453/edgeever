@@ -5,9 +5,9 @@ name: Deploy EdgeEver Instance
 # 绑定通过 EDGE_EVER_* 环境变量注入（上游 run-wrangler.mjs 原生支持），
 # 不依赖 Cloudflare 控制台里的构建配置，因此不会被上游同步覆盖。
 #
-# 两种触发：
-#   1) 手动（可指定目标实例）
-#   2) "Update deployed EdgeEver" 同步上游成功后自动部署，实现"跟着上游更新"
+# 只手动触发。
+# 上游同步（Update deployed EdgeEver）只负责把代码更新到 main 分支，
+# 不会自动部署到这里；部署由用户在 Actions 页面手动点 Run workflow 决定时机。
 
 on:
   workflow_dispatch:
@@ -19,9 +19,6 @@ on:
         type: choice
         options:
           - edgeever-v3
-  workflow_run:
-    workflows: ["Update deployed EdgeEver"]
-    types: [completed]
 
 permissions:
   contents: read
@@ -32,8 +29,6 @@ concurrency:
 
 jobs:
   deploy:
-    # 手动触发总是执行；由同步工作流触发时，只有同步成功才部署
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
