@@ -59,6 +59,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # 每次升级上游版本都可能带来新的 D1 迁移。若只部署代码不迁移 schema，
+      # API 会因缺列/缺表返回 503 database_not_ready，客户端表现为只能看到
+      # 本地缓存的一两条笔记、新建笔记无法同步。必须先迁移再部署。
+      - name: Apply D1 migrations
+        run: bun run db:migrate:remote
+
       - name: Build web assets
         run: bun run build
 
@@ -77,3 +83,11 @@ jobs:
             code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "${base}${path}" || true)"
             echo "  ${path} -> ${code}"
           done
+          # schema 未就绪时接口会返回 503 database_not_ready，直接让流水线失败，
+          # 避免"部署成功但客户端同步全挂"这种静默故障。
+          body="$(curl -s --max-time 25 "${base}/api/v1/auth/session" || true)"
+          echo "  /api/v1/auth/session -> ${body:0:200}"
+          if printf '%s' "$body" | grep -q "database_not_ready"; then
+            echo "::error::D1 schema 未就绪，请检查 Apply D1 migrations 步骤"
+            exit 1
+          fi
